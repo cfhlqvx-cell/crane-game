@@ -1,0 +1,1950 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>クレーンゲーム</title>
+
+<style>
+
+body{
+    margin:0;
+    overflow:hidden;
+    background:#111;
+    font-family:Arial;
+}
+
+canvas{
+    display:block;
+}
+
+#ui{
+    position:absolute;
+    top:10px;
+    left:10px;
+    z-index:10;
+    background:rgba(0,0,0,0.75);
+    color:white;
+    padding:15px;
+    border-radius:12px;
+    width:320px;
+}
+
+#status{
+    margin-top:10px;
+    color:#7cff7c;
+    min-height:24px;
+}
+
+#playBtn{
+    width:100%;
+    height:50px;
+    border:none;
+    border-radius:10px;
+    background:orange;
+    font-size:20px;
+    font-weight:bold;
+    cursor:pointer;
+    margin-top:10px;
+}
+
+.info{
+    margin-top:10px;
+    font-size:13px;
+    line-height:1.7;
+}
+
+#completeScreen{
+    position:absolute;
+    inset:0;
+    display:none;
+    justify-content:center;
+    align-items:center;
+    flex-direction:column;
+    background:rgba(0,0,0,0.9);
+    z-index:999;
+    color:white;
+}
+
+#completeText{
+    font-size:80px;
+    font-weight:bold;
+    color:gold;
+    text-shadow:
+        0 0 20px gold,
+        0 0 50px orange;
+    margin-bottom:30px;
+}
+
+#completeMoney{
+    font-size:42px;
+}
+
+#getEffect{
+
+    position:absolute;
+    inset:0;
+
+    display:none;
+    justify-content:center;
+    align-items:center;
+
+    font-size:120px;
+    font-weight:bold;
+
+    color:gold;
+
+    text-shadow:
+        0 0 20px gold,
+        0 0 60px orange,
+        0 0 100px yellow;
+
+    background:rgba(255,255,255,0.08);
+
+    z-index:998;
+
+    animation:getFlash 0.8s infinite;
+}
+
+@keyframes getFlash{
+
+    0%{
+        transform:scale(1);
+        opacity:1;
+    }
+
+    50%{
+        transform:scale(1.08);
+        opacity:0.85;
+    }
+
+    100%{
+        transform:scale(1);
+        opacity:1;
+    }
+}
+
+#replayBtn{
+
+    margin-top:40px;
+
+    width:260px;
+    height:70px;
+
+    border:none;
+    border-radius:16px;
+
+    font-size:32px;
+    font-weight:bold;
+
+    cursor:pointer;
+
+    background:gold;
+    color:black;
+}
+
+</style>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+
+</head>
+<body>
+
+//////////////////////////////////////////////////////
+// ▼ 音源（HTMLファイルと同じ場所にMP3を置く）
+//////////////////////////////////////////////////////
+
+<audio id="moveSound" preload="auto">
+    <source src="move.mp3" type="audio/mpeg">
+</audio>
+
+<audio id="downSound" preload="auto">
+    <source src="down.mp3" type="audio/mpeg">
+</audio>
+
+<audio id="coinSound" preload="auto">
+    <source src="coin.mp3" type="audio/mpeg">
+</audio>
+
+<audio id="getSound" preload="auto">
+    <source src="get.mp3" type="audio/mpeg">
+</audio>
+
+<audio id="failSound" preload="auto">
+    <source src="fail.mp3" type="audio/mpeg">
+</audio>
+
+<div id="ui">
+
+<h2>クレーンゲーム</h2>
+
+<div>
+累計金額：
+<span id="money">0</span>円
+</div>
+
+<button id="playBtn">
+100円投入
+</button>
+
+<div id="status">
+STARTを押してください
+</div>
+
+<div class="info">
+
+① ENTER長押し → 横移動<br>
+② ENTER長押し → 奥移動<br>
+③ ENTER → 降下<br>
+④ マウス左右移動 → 視点変更<br>
+⑤ 全景品GETで COMPLETE
+
+</div>
+
+</div>
+
+<div id="completeScreen">
+
+    <div id="completeText">
+        COMPLETE!!
+    </div>
+
+    <div id="completeMoney">
+    </div>
+
+    <div id="getEffect">
+    GET!!
+    </div>
+
+    <button id="replayBtn">
+        もう一度遊ぶ
+    </button>
+
+</div>
+
+<script>
+
+//////////////////////////////////////////////////////
+// 基本
+//////////////////////////////////////////////////////
+
+const scene = new THREE.Scene();
+
+scene.background =
+    new THREE.Color(0x101018);
+
+const camera =
+    new THREE.PerspectiveCamera(
+        50,
+        window.innerWidth/window.innerHeight,
+        0.1,
+        1000
+    );
+
+const renderer =
+    new THREE.WebGLRenderer({
+        antialias:true
+    });
+
+renderer.setSize(
+    window.innerWidth,
+    window.innerHeight
+);
+
+renderer.shadowMap.enabled = true;
+
+document.body.appendChild(
+    renderer.domElement
+);
+
+//////////////////////////////////////////////////////
+// カメラ
+//////////////////////////////////////////////////////
+
+let camRot = 0;
+
+function updateCamera(){
+
+    const radius = 14;
+
+    camera.position.x =
+        Math.sin(camRot) * radius;
+
+    camera.position.z =
+        Math.cos(camRot) * radius;
+
+    camera.position.y = 6.5;
+
+    camera.lookAt(0,5,0);
+}
+
+updateCamera();
+
+window.addEventListener(
+    "mousemove",
+    e=>{
+
+        const ratio =
+            e.clientX /
+            window.innerWidth;
+
+        camRot =
+            (ratio - 0.5) * 2.4;
+
+        updateCamera();
+    }
+);
+
+//////////////////////////////////////////////////////
+// ライト
+//////////////////////////////////////////////////////
+
+const ambient =
+    new THREE.AmbientLight(
+        0xffffff,
+        1.2
+    );
+
+scene.add(ambient);
+
+const light =
+    new THREE.DirectionalLight(
+        0xffffff,
+        2
+    );
+
+light.position.set(10,20,10);
+
+light.castShadow = true;
+
+scene.add(light);
+
+//////////////////////////////////////////////////////
+// 床
+//////////////////////////////////////////////////////
+
+const floorTextureCanvas =
+    document.createElement("canvas");
+
+floorTextureCanvas.width = 512;
+floorTextureCanvas.height = 512;
+
+const floorCtx =
+    floorTextureCanvas.getContext("2d");
+
+//////////////////////////////////////////////////
+// ベース
+//////////////////////////////////////////////////
+
+floorCtx.fillStyle = "#202020";
+
+floorCtx.fillRect(0,0,512,512);
+
+//////////////////////////////////////////////////
+// 市松模様
+//////////////////////////////////////////////////
+
+for(let y=0;y<8;y++){
+
+    for(let x=0;x<8;x++){
+
+        floorCtx.fillStyle =
+            (x+y)%2===0
+            ? "#2d2d2d"
+            : "#252525";
+
+        floorCtx.fillRect(
+            x*64,
+            y*64,
+            64,
+            64
+        );
+    }
+}
+
+const floorTexture =
+    new THREE.CanvasTexture(
+        floorTextureCanvas
+    );
+
+floorTexture.wrapS =
+    THREE.RepeatWrapping;
+
+floorTexture.wrapT =
+    THREE.RepeatWrapping;
+
+floorTexture.repeat.set(8,8);
+
+const floor =
+    new THREE.Mesh(
+
+        new THREE.PlaneGeometry(
+            80,80
+        ),
+
+        new THREE.MeshStandardMaterial({
+
+            map:floorTexture,
+
+            roughness:0.8
+        })
+    );
+
+floor.rotation.x =
+    -Math.PI/2;
+
+floor.receiveShadow = true;
+
+scene.add(floor);
+
+//////////////////////////////////////////////////
+// ▼ ゲーセン壁
+//////////////////////////////////////////////////
+
+function createWall(x,z,rot){
+
+    const wall =
+        new THREE.Mesh(
+
+            new THREE.PlaneGeometry(
+                80,
+                25
+            ),
+
+            new THREE.MeshStandardMaterial({
+
+                color:0x111133,
+
+                emissive:0x111144,
+
+                emissiveIntensity:0.25
+            })
+        );
+
+    wall.position.set(
+        x,
+        12,
+        z
+    );
+
+    wall.rotation.y = rot;
+
+    scene.add(wall);
+}
+
+createWall(0,-40,0);
+createWall(-40,0,Math.PI/2);
+createWall(40,0,-Math.PI/2);
+
+//////////////////////////////////////////////////
+// ▼ ネオン柱
+//////////////////////////////////////////////////
+
+for(let i=0;i<8;i++){
+
+    const neon =
+        new THREE.Mesh(
+
+            new THREE.BoxGeometry(
+                0.4,
+                8,
+                0.4
+            ),
+
+            new THREE.MeshStandardMaterial({
+
+                color:0x00ccff,
+
+                emissive:0x00ccff,
+
+                emissiveIntensity:3
+            })
+        );
+
+    neon.position.set(
+        -15 + i*4,
+        4,
+        -8
+    );
+
+    scene.add(neon);
+}
+
+
+
+//////////////////////////////////////////////////////
+// 素材
+//////////////////////////////////////////////////////
+
+const whiteMat =
+    new THREE.MeshStandardMaterial({
+        color:0xf5f5f5
+    });
+
+const redMat =
+    new THREE.MeshStandardMaterial({
+        color:0xff3355
+    });
+
+const glassMat =
+    new THREE.MeshPhysicalMaterial({
+        color:0x88ccff,
+        transparent:true,
+        opacity:0.12,
+        transmission:1
+    });
+
+const darkButtonMat =
+    new THREE.MeshStandardMaterial({
+        color:0x333333
+    });
+
+const glowButtonMat =
+    new THREE.MeshStandardMaterial({
+        color:0x00aaff,
+        emissive:0x00aaff,
+        emissiveIntensity:2
+    });
+
+//////////////////////////////////////////////////////
+// ゲーム機
+//////////////////////////////////////////////////////
+
+//////////////////////////////////////////////////
+// ▼ 矢印テクスチャ生成
+//////////////////////////////////////////////////
+
+function createArrowTexture(text){
+
+    const canvas =
+        document.createElement("canvas");
+
+    canvas.width = 256;
+    canvas.height = 256;
+
+    const ctx =
+        canvas.getContext("2d");
+
+    //////////////////////////////////////////////////
+    // 背景
+    //////////////////////////////////////////////////
+
+    ctx.fillStyle = "#222";
+
+    ctx.beginPath();
+
+    ctx.arc(
+        128,
+        128,
+        110,
+        0,
+        Math.PI*2
+    );
+
+    ctx.fill();
+
+    //////////////////////////////////////////////////
+    // 文字
+    //////////////////////////////////////////////////
+
+    ctx.fillStyle = "white";
+
+    ctx.font =
+        "bold 140px Arial";
+
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    ctx.fillText(
+        text,
+        128,
+        138
+    );
+
+    const texture =
+        new THREE.CanvasTexture(canvas);
+
+    return texture;
+}
+
+const machine =
+    new THREE.Group();
+
+scene.add(machine);
+
+function pillar(x,z){
+
+    const p =
+        new THREE.Mesh(
+
+            new THREE.BoxGeometry(
+                0.4,12,0.4
+            ),
+
+            redMat
+        );
+
+    p.position.set(x,6,z);
+
+    machine.add(p);
+}
+
+pillar(-5,-5);
+pillar(5,-5);
+pillar(-5,5);
+pillar(5,5);
+
+const roof =
+    new THREE.Mesh(
+
+        new THREE.BoxGeometry(
+            10.5,0.5,10.5
+        ),
+
+        redMat
+    );
+
+roof.position.y = 12;
+
+machine.add(roof);
+
+const base =
+    new THREE.Mesh(
+
+        new THREE.BoxGeometry(
+            11,2,11
+        ),
+
+        whiteMat
+    );
+
+base.position.y = 1;
+
+machine.add(base);
+
+function glass(x,y,z,w,h,d){
+
+    const g =
+        new THREE.Mesh(
+
+            new THREE.BoxGeometry(
+                w,h,d
+            ),
+
+            glassMat
+        );
+
+    g.position.set(x,y,z);
+
+    machine.add(g);
+}
+
+glass(0,7,5,9.5,9,0.1);
+glass(0,7,-5,9.5,9,0.1);
+glass(-5,7,0,0.1,9,9.5);
+glass(5,7,0,0.1,9,9.5);
+
+//////////////////////////////////////////////////////
+// 操作パネル
+//////////////////////////////////////////////////////
+
+const panel =
+    new THREE.Mesh(
+
+        new THREE.BoxGeometry(
+            5,0.5,2
+        ),
+
+        new THREE.MeshStandardMaterial({
+            color:0xdddddd
+        })
+    );
+
+panel.position.set(
+    0,
+    2.5,
+    6
+);
+
+machine.add(panel);
+
+//////////////////////////////////////////////////////
+// 光る右ボタン
+//////////////////////////////////////////////////////
+
+const rightButton =
+    new THREE.Mesh(
+
+    new THREE.CylinderGeometry(
+        0.45,
+        0.45,
+        0.25,
+        32
+    ),
+
+    new THREE.MeshStandardMaterial({
+
+    map:createArrowTexture("↑"),
+
+    emissive:new THREE.Color(0x00aaff),
+
+    emissiveIntensity:0
+})
+);
+
+rightButton.rotation.x =
+    Math.PI/2;
+
+rightButton.position.set(
+    -1.2,
+    2.9,
+    6
+);
+
+machine.add(rightButton);
+
+//////////////////////////////////////////////////////
+// 光る奥ボタン
+//////////////////////////////////////////////////////
+
+const upButton =
+    new THREE.Mesh(
+
+    new THREE.CylinderGeometry(
+        0.45,
+        0.45,
+        0.25,
+        32
+    ),
+
+    new THREE.MeshStandardMaterial({
+
+    map:createArrowTexture("←"),
+
+    emissive:new THREE.Color(0x00aaff),
+
+    emissiveIntensity:0
+})
+);
+
+upButton.rotation.x =
+    Math.PI/2;
+
+upButton.position.set(
+    1.2,
+    2.9,
+    6
+);
+
+machine.add(upButton);
+
+//////////////////////////////////////////////////////
+// 景品（クマ）
+//////////////////////////////////////////////////////
+
+const prizes = [];
+
+function createPrize(x,z,color){
+
+    const group =
+        new THREE.Group();
+
+    //////////////////////////////////////////////////
+    // 素材
+    //////////////////////////////////////////////////
+
+    const furMat =
+        new THREE.MeshStandardMaterial({
+
+            color:color,
+
+            roughness:0.95,
+            metalness:0.02
+        });
+
+    const eyeMat =
+        new THREE.MeshStandardMaterial({
+            color:0x111111
+        });
+
+    const noseMat =
+        new THREE.MeshStandardMaterial({
+            color:0x442222
+        });
+
+    //////////////////////////////////////////////////
+    // 胴体
+    //////////////////////////////////////////////////
+
+    const body =
+        new THREE.Mesh(
+
+            new THREE.SphereGeometry(
+                0.72,
+                40,
+                40
+            ),
+
+            furMat
+        );
+
+    body.scale.y = 1.08;
+
+    body.castShadow = true;
+
+    group.add(body);
+
+    //////////////////////////////////////////////////
+    // お腹
+    //////////////////////////////////////////////////
+
+    const belly =
+        new THREE.Mesh(
+
+            new THREE.SphereGeometry(
+                0.42,
+                32,
+                32
+            ),
+
+            new THREE.MeshStandardMaterial({
+                color:0xfff2dd,
+                roughness:1
+            })
+        );
+
+    belly.position.set(
+        0,
+        -0.05,
+        0.48
+    );
+
+    belly.scale.y = 1.1;
+
+    group.add(belly);
+
+    //////////////////////////////////////////////////
+    // 頭
+    //////////////////////////////////////////////////
+
+    const head =
+        new THREE.Mesh(
+
+            new THREE.SphereGeometry(
+                0.54,
+                40,
+                40
+            ),
+
+            furMat
+        );
+
+    head.position.y = 0.92;
+
+    head.castShadow = true;
+
+    group.add(head);
+
+    //////////////////////////////////////////////////
+    // 耳
+    //////////////////////////////////////////////////
+
+    function createEar(px){
+
+        const ear =
+            new THREE.Mesh(
+
+                new THREE.SphereGeometry(
+                    0.2,
+                    24,
+                    24
+                ),
+
+                furMat
+            );
+
+        ear.position.set(
+            px,
+            1.3,
+            -0.08
+        );
+
+        ear.scale.y = 1.15;
+
+        group.add(ear);
+
+        //////////////////////////////////////////////////
+        // 耳内側
+        //////////////////////////////////////////////////
+
+        const inner =
+            new THREE.Mesh(
+
+                new THREE.SphereGeometry(
+                    0.11,
+                    16,
+                    16
+                ),
+
+                new THREE.MeshStandardMaterial({
+                    color:0xffc0cb
+                })
+            );
+
+        inner.position.z = 0.1;
+
+        ear.add(inner);
+    }
+
+    createEar(-0.28);
+    createEar(0.28);
+
+    //////////////////////////////////////////////////
+    // 鼻
+    //////////////////////////////////////////////////
+
+    const nose =
+        new THREE.Mesh(
+
+            new THREE.SphereGeometry(
+                0.09,
+                20,
+                20
+            ),
+
+            noseMat
+        );
+
+    nose.position.set(
+        0,
+        0.84,
+        0.5
+    );
+
+    nose.scale.z = 1.3;
+
+    group.add(nose);
+
+    //////////////////////////////////////////////////
+    // 口
+    //////////////////////////////////////////////////
+
+    const mouth =
+        new THREE.Mesh(
+
+            new THREE.TorusGeometry(
+                0.06,
+                0.01,
+                8,
+                20,
+                Math.PI
+            ),
+
+            new THREE.MeshStandardMaterial({
+                color:0x222222
+            })
+        );
+
+    mouth.rotation.z = Math.PI;
+
+    mouth.position.set(
+        0,
+        0.74,
+        0.53
+    );
+
+    group.add(mouth);
+
+    //////////////////////////////////////////////////
+    // 目
+    //////////////////////////////////////////////////
+
+    function createEye(px){
+
+        const eye =
+            new THREE.Mesh(
+
+                new THREE.SphereGeometry(
+                    0.055,
+                    20,
+                    20
+                ),
+
+                eyeMat
+            );
+
+        eye.position.set(
+            px,
+            0.98,
+            0.45
+        );
+
+        group.add(eye);
+
+        //////////////////////////////////////////////////
+        // ハイライト
+        //////////////////////////////////////////////////
+
+        const shine =
+            new THREE.Mesh(
+
+                new THREE.SphereGeometry(
+                    0.018,
+                    8,
+                    8
+                ),
+
+                new THREE.MeshStandardMaterial({
+                    color:0xffffff,
+                    emissive:0xffffff,
+                    emissiveIntensity:0.6
+                })
+            );
+
+        shine.position.set(
+            0.015,
+            0.015,
+            0.03
+        );
+
+        eye.add(shine);
+    }
+
+    createEye(-0.18);
+    createEye(0.18);
+
+    //////////////////////////////////////////////////
+    // 手
+    //////////////////////////////////////////////////
+
+    function createArm(px){
+
+        const arm =
+            new THREE.Mesh(
+
+                new THREE.CapsuleGeometry(
+                    0.12,
+                    0.32,
+                    6,
+                    12
+                ),
+
+                furMat
+            );
+
+        arm.position.set(
+            px,
+            0.15,
+            0.45
+        );
+
+        arm.rotation.z = px > 0
+            ? -0.6
+            : 0.6;
+
+        group.add(arm);
+    }
+
+    createArm(-0.62);
+    createArm(0.62);
+
+    //////////////////////////////////////////////////
+    // 足
+    //////////////////////////////////////////////////
+
+    function createLeg(px){
+
+        const leg =
+            new THREE.Mesh(
+
+                new THREE.CapsuleGeometry(
+                    0.14,
+                    0.25,
+                    6,
+                    12
+                ),
+
+                furMat
+            );
+
+        leg.position.set(
+            px,
+            -0.72,
+            0.2
+        );
+
+        group.add(leg);
+    }
+
+    createLeg(-0.28);
+    createLeg(0.28);
+
+    //////////////////////////////////////////////////
+    // 影
+    //////////////////////////////////////////////////
+
+    group.traverse(o=>{
+
+        if(o.isMesh){
+
+            o.castShadow = true;
+            o.receiveShadow = true;
+        }
+    });
+
+    //////////////////////////////////////////////////
+    // 配置
+    //////////////////////////////////////////////////
+
+    group.position.set(
+        x,
+        2.2,
+        z
+    );
+
+    group.rotation.y =
+    (Math.random()-0.5)*0.8;
+
+    scene.add(group);
+
+    prizes.push(group);
+}
+
+
+
+//////////////////////////////////////////////////
+// ▼ 景品を1個だけランダム配置
+//////////////////////////////////////////////////
+
+const randomX =
+    (Math.random() * 6) - 3;
+
+const randomZ =
+    (Math.random() * 6) - 3;
+
+createPrize(
+    randomX,
+    randomZ,
+    0xffaa00
+);
+
+//////////////////////////////////////////////////////
+// クレーン
+//////////////////////////////////////////////////////
+
+const crane =
+    new THREE.Group();
+
+scene.add(crane);
+
+const craneHead =
+    new THREE.Mesh(
+
+        new THREE.BoxGeometry(
+            1.5,0.5,1.5
+        ),
+
+        whiteMat
+    );
+
+crane.add(craneHead);
+
+const wire =
+    new THREE.Mesh(
+
+        new THREE.CylinderGeometry(
+            0.03,0.03,3
+        ),
+
+        new THREE.MeshStandardMaterial({
+            color:0x222222
+        })
+    );
+
+wire.position.y = -1.5;
+
+crane.add(wire);
+
+//////////////////////////////////////////////////////
+// アーム
+//////////////////////////////////////////////////////
+
+const clawGroup =
+    new THREE.Group();
+
+clawGroup.position.y = -3;
+
+crane.add(clawGroup);
+
+function createArm(rot){
+
+    const pivot =
+        new THREE.Group();
+
+    pivot.rotation.y = rot;
+
+    const arm =
+        new THREE.Mesh(
+
+            new THREE.BoxGeometry(
+                0.1,1,0.1
+            ),
+
+            whiteMat
+        );
+
+    arm.position.set(
+        0,
+        -0.5,
+        0.4
+    );
+
+    pivot.add(arm);
+
+    clawGroup.add(pivot);
+
+    return pivot;
+}
+
+const arm1 = createArm(0);
+const arm2 = createArm(Math.PI*2/3);
+const arm3 = createArm(Math.PI*4/3);
+
+crane.position.set(-3.5,10,3.5);
+
+//////////////////////////////////////////////////
+// ▼ 隣のクレーンゲーム機
+//////////////////////////////////////////////////
+
+function createSideMachine(offsetX){
+
+    const clone =
+        machine.clone();
+
+    clone.scale.set(
+        0.95,
+        0.95,
+        0.95
+    );
+
+    //////////////////////////////////////////////////
+    // メイン筐体の隣
+    //////////////////////////////////////////////////
+
+    clone.position.set(
+        offsetX,
+        0,
+        0
+    );
+
+    scene.add(clone);
+}
+
+//////////////////////////////////////////////////
+// 左右に配置
+//////////////////////////////////////////////////
+
+createSideMachine(-13);
+createSideMachine(13);
+
+//////////////////////////////////////////////////
+// ▼ 天井照明
+//////////////////////////////////////////////////
+
+for(let i=0;i<6;i++){
+
+    const lightBox =
+        new THREE.Mesh(
+
+            new THREE.BoxGeometry(
+                6,
+                0.2,
+                2
+            ),
+
+            new THREE.MeshStandardMaterial({
+
+                color:0xffffff,
+
+                emissive:0xffffff,
+
+                emissiveIntensity:2
+            })
+        );
+
+    lightBox.position.set(
+        -15 + i*6,
+        14,
+        0
+    );
+
+    scene.add(lightBox);
+}
+
+//////////////////////////////////////////////////////
+// UI
+//////////////////////////////////////////////////////
+
+const statusText =
+    document.getElementById("status");
+
+const moneyText =
+    document.getElementById("money");
+
+const completeScreen =
+    document.getElementById("completeScreen");
+
+const completeMoney =
+    document.getElementById("completeMoney");
+
+const getEffect =
+    document.getElementById("getEffect");
+
+const replayBtn =
+    document.getElementById("replayBtn");
+//////////////////////////////////////////////////////
+// ▼ 音
+//////////////////////////////////////////////////////
+
+const moveSound =
+    document.getElementById("moveSound");
+
+moveSound.loop = true;
+
+// ▼ moveSound の下に追加
+
+const downSound =
+    document.getElementById("downSound");
+
+downSound.loop = true;
+
+const coinSound =
+    document.getElementById("coinSound");
+
+const getSound =
+    document.getElementById("getSound");
+
+const failSound =
+    document.getElementById("failSound");
+
+//////////////////////////////////////////////////////
+// 状態
+//////////////////////////////////////////////////////
+
+let totalMoney = 0;
+let clearedCount = 0;
+
+let phase = 0;
+let playing = false;
+let busy = false;
+let finished = false;
+let enterHeld = false;
+let restarting = false;
+
+//////////////////////////////////////////////////////
+// ボタン点滅
+//////////////////////////////////////////////////////
+
+let blinkTimer;
+
+function blinkRight(){
+
+    clearInterval(blinkTimer);
+
+    upButton.material.emissiveIntensity = 0;
+
+    blinkTimer =
+        setInterval(()=>{
+
+            rightButton.material.emissiveIntensity =
+                rightButton.material.emissiveIntensity > 0
+                ? 0
+                : 2;
+
+        },300);
+}
+
+function blinkUp(){
+
+    clearInterval(blinkTimer);
+
+    rightButton.material.emissiveIntensity = 0;
+
+    blinkTimer =
+        setInterval(()=>{
+
+            upButton.material.emissiveIntensity =
+                upButton.material.emissiveIntensity > 0
+                ? 0
+                : 2;
+
+        },300);
+}
+
+function stopBlink(){
+
+    clearInterval(blinkTimer);
+
+    rightButton.material.emissiveIntensity = 0;
+
+    upButton.material.emissiveIntensity = 0;
+}
+
+//////////////////////////////////////////////////////
+// スタート
+//////////////////////////////////////////////////////
+
+function startGame(){
+
+    stopBlink();
+    
+    completeScreen.style.display =
+        "none";
+
+    crane.position.set(
+        -3.5,
+        10,
+        3.5
+    );
+
+    clawGroup.position.y = -3;
+
+    phase = 1;
+
+    playing = true;
+    finished = false;
+    busy = false;
+
+    restarting = true;
+
+    statusText.textContent =
+        "ENTER長押し → 横移動";
+
+    blinkRight();
+
+    setTimeout(()=>{
+
+        restarting = false;
+
+    },300);
+}
+
+document.getElementById(
+    "playBtn"
+).onclick = ()=>{
+
+    if(playing) return;
+
+    totalMoney += 100;
+
+//////////////////////////////////////////////////
+// ▼ コイン音
+//////////////////////////////////////////////////
+
+coinSound.currentTime = 0;
+coinSound.play();
+
+    moneyText.textContent =
+        totalMoney;
+
+    startGame();
+};
+
+//////////////////////////////////////////////////////
+// キー操作
+//////////////////////////////////////////////////////
+
+window.addEventListener(
+    "keydown",
+    e=>{
+
+        if(
+            e.code==="Enter"
+            &&
+            finished
+        ){
+
+            totalMoney += 100;
+
+            moneyText.textContent =
+                totalMoney;
+
+    coinSound.currentTime = 0;
+    coinSound.play();
+
+            startGame();
+
+            return;
+        }
+
+        if(restarting) return;
+
+        if(e.code==="Enter"){
+
+            enterHeld = true;
+
+            //////////////////////////////////////////////////
+            // ▼ 音再生
+            //////////////////////////////////////////////////
+
+            if(
+                (phase===1 || phase===2)
+                &&
+                moveSound.paused
+            ){
+
+                moveSound.currentTime = 0;
+                moveSound.play();
+            }
+        }
+    }
+);
+
+window.addEventListener(
+    "keyup",
+    e=>{
+
+        if(restarting) return;
+
+        if(e.code==="Enter"){
+
+            enterHeld = false;
+
+            //////////////////////////////////////////////////
+            // ▼ 音停止
+            //////////////////////////////////////////////////
+
+            moveSound.pause();
+            moveSound.currentTime = 0;
+
+            if(phase===1){
+
+                phase = 2;
+
+                statusText.textContent =
+                    "ENTER長押し → 奥移動";
+
+                blinkUp();
+            }
+
+            else if(phase===2){
+
+                phase = 3;
+
+                statusText.textContent =
+                    "ENTERで降下";
+
+                stopBlink();
+            }
+
+            else if(
+                phase===3
+                &&
+                !busy
+            ){
+
+                dropClaw();
+            }
+        }
+    }
+);
+
+//////////////////////////////////////////////////////
+// WAIT
+//////////////////////////////////////////////////////
+
+function wait(ms){
+
+    return new Promise(
+        r=>setTimeout(r,ms)
+    );
+}
+
+//////////////////////////////////////////////////////
+// 降下
+//////////////////////////////////////////////////////
+
+async function dropClaw(){
+
+    busy = true;
+
+    let target = null;
+
+    let dropped = false;
+
+    statusText.textContent =
+        "下降中...";
+
+      
+
+downSound.currentTime = 0;
+downSound.play();
+
+    arm1.rotation.z = 0.6;
+    arm2.rotation.z = 0.6;
+    arm3.rotation.z = 0.6;
+
+    while(clawGroup.position.y > -7){
+
+        clawGroup.position.y -= 0.025;
+
+        for(let p of prizes){
+
+            if(!p.visible) continue;
+
+            const dx =
+                p.position.x -
+                crane.position.x;
+
+            const dz =
+                p.position.z -
+                crane.position.z;
+
+            const dist =
+                Math.sqrt(dx*dx+dz*dz);
+
+            if(dist < 0.8){
+
+                target = p;
+            }
+        }
+
+        await wait(16);
+    }
+
+
+downSound.pause();
+downSound.currentTime = 0;
+
+    arm1.rotation.z = 0;
+    arm2.rotation.z = 0;
+    arm3.rotation.z = 0;
+
+    let strong = false;
+
+    if(target){
+
+        const dx =
+            target.position.x -
+            crane.position.x;
+
+        const dz =
+            target.position.z -
+            crane.position.z;
+
+        const dist =
+            Math.sqrt(dx*dx+dz*dz);
+
+        if(dist < 0.35){
+
+            strong = true;
+        }
+    }
+
+    while(clawGroup.position.y < -3){
+
+        clawGroup.position.y += 0.05;
+
+        if(target && strong){
+
+            target.position.x =
+                crane.position.x;
+
+            target.position.y =
+                crane.position.y
+                +
+                clawGroup.position.y
+                -
+                0.6;
+
+            target.position.z =
+                crane.position.z;
+        }
+
+        await wait(16);
+    }
+
+    if(target && strong){
+
+        const dropChance =
+            Math.random() < 0.7;
+
+        while(crane.position.z < 4){
+
+            crane.position.z += 0.05;
+
+            target.position.x =
+                crane.position.x;
+
+            target.position.y =
+                crane.position.y
+                +
+                clawGroup.position.y
+                -
+                0.6;
+
+            target.position.z =
+                crane.position.z;
+
+            if(
+                dropChance
+                &&
+                crane.position.z > 1
+                &&
+                !dropped
+            ){
+
+                dropped = true;
+
+                const fallX =
+                    target.position.x;
+
+                const fallZ =
+                    target.position.z;
+
+                while(target.position.y > 2.2){
+
+                    target.position.y -= 0.08;
+
+                    await wait(16);
+                }
+
+                target.position.set(
+                    fallX,
+                    2.2,
+                    fallZ
+                );
+
+                failSound.currentTime = 0;
+                failSound.play();
+
+                statusText.textContent =
+                    "落ちた...";
+
+                break;
+            }
+
+            await wait(16);
+        }
+
+        if(!dropped){
+
+            target.position.set(
+                0,
+                4,
+                6
+            );
+
+            while(target.position.y > 2.2){
+
+                target.position.y -= 0.03;
+
+                await wait(16);
+            }
+
+    
+
+
+//////////////////////////////////////////////////
+// ▼ GET演出
+//////////////////////////////////////////////////
+
+getSound.currentTime = 0;
+getSound.play();
+
+getEffect.style.display =
+    "flex";
+
+renderer.domElement.style.filter =
+    "brightness(1.8)";
+
+target.scale.set(1.3,1.3,1.3);
+
+await wait(2200);
+
+renderer.domElement.style.filter =
+    "brightness(1)";
+
+getEffect.style.display =
+    "none";
+
+target.visible = false;
+
+clearedCount++;
+
+renderer.domElement.style.filter =
+    "brightness(1.8)";
+
+await wait(120);
+
+renderer.domElement.style.filter =
+    "brightness(1)";
+
+            if(clearedCount >= prizes.length){
+
+                completeScreen.style.display =
+                    "flex";
+
+                completeMoney.innerHTML =
+                    "累計金額：" +
+                    totalMoney +
+                    "円";
+
+                statusText.textContent =
+                    "COMPLETE!!";
+
+            }else{
+
+                statusText.textContent =
+                    "GET!! ENTERで再スタート";
+            }
+        }
+
+    }else{
+
+        statusText.textContent =
+            "つかめなかった...";
+    }
+
+    finished = true;
+    playing = false;
+    busy = false;
+    phase = 0;
+}
+
+//////////////////////////////////////////////////
+// ▼ リプレイ
+//////////////////////////////////////////////////
+
+replayBtn.onclick = ()=>{
+
+    stopBlink();
+    
+    //////////////////////////////////////////////////
+    // COMPLETE閉じる
+    //////////////////////////////////////////////////
+
+    completeScreen.style.display =
+        "none";
+
+    //////////////////////////////////////////////////
+    // 累計金額リセット
+    //////////////////////////////////////////////////
+
+    totalMoney = 0;
+
+    moneyText.textContent =
+        totalMoney;
+
+    //////////////////////////////////////////////////
+    // 景品復活＋ランダム配置
+    //////////////////////////////////////////////////
+
+    clearedCount = 0;
+
+    for(let p of prizes){
+
+        p.visible = true;
+
+        p.scale.set(1,1,1);
+
+        p.position.set(
+
+            (Math.random()*6)-3,
+            2.2,
+            (Math.random()*6)-3
+        );
+    }
+
+    //////////////////////////////////////////////////
+    // クレーン位置リセット
+    //////////////////////////////////////////////////
+
+    crane.position.set(
+        -3.5,
+        10,
+        3.5
+    );
+
+    clawGroup.position.y = -3;
+
+    //////////////////////////////////////////////////
+    // 状態リセット
+    //////////////////////////////////////////////////
+
+    finished = false;
+    playing = false;
+    busy = false;
+    phase = 0;
+
+    statusText.textContent =
+        "STARTを押してください";
+};
+
+//////////////////////////////////////////////////////
+// アニメーション
+//////////////////////////////////////////////////////
+
+function animate(){
+
+    requestAnimationFrame(
+        animate
+    );
+
+    if(
+        phase===1
+        &&
+        enterHeld
+    ){
+
+        crane.position.x += 0.03;
+
+        if(crane.position.x > 3.5){
+
+            crane.position.x = -3.5;
+        }
+    }
+
+    if(
+        phase===2
+        &&
+        enterHeld
+    ){
+
+        crane.position.z -= 0.03;
+
+        if(crane.position.z < -3.5){
+
+            crane.position.z = 3.5;
+        }
+    }
+
+    renderer.render(scene,camera);
+}
+
+animate();
+
+//////////////////////////////////////////////////////
+// リサイズ
+//////////////////////////////////////////////////////
+
+window.addEventListener(
+    "resize",
+    ()=>{
+
+        camera.aspect =
+            window.innerWidth /
+            window.innerHeight;
+
+        camera.updateProjectionMatrix();
+
+        renderer.setSize(
+            window.innerWidth,
+            window.innerHeight
+        );
+    }
+);
+
+</script>
+
+</body>
+</html>
